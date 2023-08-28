@@ -27,6 +27,7 @@ from paddle.distributed import fleet
 from paddle.distributed.fleet.utils import recompute
 
 import paddle_xpu
+from paddle_xpu_nn import xpu_rms_norm
 from paddle_xpu.ops.transformer_engine.model.llama import FFN
 from paddle_xpu.ops.transformer_engine.xte_meta import *
 import os
@@ -305,6 +306,7 @@ class LlamaRMSNorm(nn.Layer):
             mark_as_sequence_parallel_parameter(self.weight)
 
     def forward(self, hidden_states):
+        return xpu_rms_norm(hidden_states, self.weight, self.variance_epsilon)[0]
         if self.config.use_fused_rms_norm:
             return rms_norm_fused(hidden_states, self.weight, self.variance_epsilon)
 
