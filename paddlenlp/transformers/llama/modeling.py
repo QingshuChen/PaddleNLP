@@ -462,9 +462,9 @@ class LlamaMLP(nn.Layer):
         else:
             if os.getenv("XPU_LLAMA_FFN") == "True":
                 out = self.ffn(x, (self.step) % 16 == 0)
+                self.step = self.step + 1
             else:
                 out = self.down_proj(F.silu(self.gate_proj(x)) * self.up_proj(x))
-            self.step = self.step + 1
         return out
 
 
