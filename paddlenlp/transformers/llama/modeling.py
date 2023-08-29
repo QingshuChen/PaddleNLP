@@ -920,6 +920,7 @@ class LlamaModel(LlamaPretrainedModel):
         super().__init__(config)
         self.vocab_size = config.vocab_size
         self.hidden_size = config.hidden_size
+        self.attention_mask = None
         self.sequence_parallel = config.sequence_parallel
         # Recompute defaults to False and is controlled by Trainer
         self.enable_recompute = False
@@ -1053,10 +1054,11 @@ class LlamaModel(LlamaPretrainedModel):
             # [seq_len * bs / n, num_head * head_dim] (n is mp parallelism)
             inputs_embeds = ScatterOp.apply(inputs_embeds)
 
+        assert attention_mask is None and not self.config.alibi
         # embed positions
-        if attention_mask is None:
-            # [bs, seq_len]
-            attention_mask = paddle.ones((batch_size, seq_length_with_past), dtype=paddle.bool)
+        #if attention_mask is None:
+        #    # [bs, seq_len]
+        #    attention_mask = paddle.ones((batch_size, seq_length_with_past), dtype=paddle.bool)
 
         if self.config.alibi:
             alibi = build_alibi_tensor(attention_mask, self.config.num_attention_heads, dtype=inputs_embeds.dtype)
@@ -1076,10 +1078,11 @@ class LlamaModel(LlamaPretrainedModel):
 
         if position_ids is None:
             position_ids = paddle.arange(seq_length, dtype="int64").expand((batch_size, seq_length))
-
-        attention_mask = self._prepare_decoder_attention_mask(
-            attention_mask, (batch_size, seq_length), cache_length, inputs_embeds.dtype
-        )  # [bs, 1, seq_len, seq_len]
+        if self.attention_mask is None:
+            attention_mask = paddle.ones((batch_size, seq_length_with_past), dtype=paddle.bool)
+            self.attention_mask = self._prepare_decoder_attention_mask(
+                attention_mask, (batch_size, seq_length), cache_length, inputs_embeds.dtype
+            )  # [bs, 1, seq_len, seq_len]
         hidden_states = inputs_embeds
 
         # decoder layers
@@ -1098,7 +1101,7 @@ class LlamaModel(LlamaPretrainedModel):
                     decoder_layer,
                     hidden_states,
                     position_ids,
-                    attention_mask,
+                    self.attention_mask,
                     output_attentions,
                     past_key_value,
                     use_cache,
@@ -1108,7 +1111,7 @@ class LlamaModel(LlamaPretrainedModel):
                 layer_outputs = decoder_layer(
                     hidden_states,
                     position_ids,
-                    attention_mask,
+                    self.attention_mask,
                     output_attentions,
                     past_key_value,
                     use_cache,
