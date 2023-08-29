@@ -30,6 +30,8 @@ import paddle_xpu
 from paddle_xpu_nn import xpu_rms_norm
 from paddle_xpu.ops.transformer_engine.model.llama import FFN
 from paddle_xpu.ops.transformer_engine.xte_meta import *
+from paddle_xpu.ops.transformer_engine.linear import ColumnParallelLinear  as XPUColumnParallelLinear
+from paddle_xpu.ops.transformer_engine.linear import RowParallelLinear  as XPURowParallelLinear
 import os
 
 try:
@@ -525,8 +527,12 @@ class LlamaAttention(nn.Layer):
             ColumnParallelLinear = ColumnSequenceParallelLinear
             RowParallelLinear = RowSequenceParallelLinear
         else:
-            ColumnParallelLinear = fleet.meta_parallel.ColumnParallelLinear
-            RowParallelLinear = fleet.meta_parallel.RowParallelLinear
+            if "xpu" in paddle.device.get_device():
+                ColumnParallelLinear = XPUColumnParallelLinear
+                RowParallelLinear = XPURowParallelLinear
+            else:
+                ColumnParallelLinear = fleet.meta_parallel.ColumnParallelLinear
+                RowParallelLinear = fleet.meta_parallel.RowParallelLinear
 
         if config.tensor_parallel_degree > 1:
             if self.fuse_attention_qkv:
@@ -535,6 +541,7 @@ class LlamaAttention(nn.Layer):
                     3 * self.hidden_size,
                     has_bias=False,
                     gather_output=False,
+                    intermediate_dtype=XTEDataType.int16,
                 )
             else:
                 self.q_proj = ColumnParallelLinear(
@@ -598,6 +605,7 @@ class LlamaAttention(nn.Layer):
                 self.hidden_size,
                 has_bias=False,
                 input_is_parallel=True,
+                intermediate_dtype=XTEDataType.int16,
             )
         else:
             self.o_proj = nn.Linear(
