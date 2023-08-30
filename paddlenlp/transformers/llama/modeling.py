@@ -409,8 +409,8 @@ class LlamaMLP(nn.Layer):
             self.ffn = FFN(
                 self.hidden_size, self.intermediate_size,
                 intermediate_dtype=XTEDataType.int16,
+                fuse_attention_ffn=config.fuse_attention_ffn,
             ) 
-            self.step = 0
             return
 
         if config.sequence_parallel:
@@ -458,15 +458,13 @@ class LlamaMLP(nn.Layer):
             self.down_proj = nn.Linear(self.intermediate_size, self.hidden_size, bias_attr=False)
 
     def forward(self, x):
+        if os.getenv("XPU_LLAMA_FFN") == "True":
+            return self.ffn(x)
         if self.fuse_attention_ffn:
             gate_out, up_out = paddle.chunk(self.gate_up_fused_proj(x), chunks=2, axis=-1)
             out = self.down_proj(F.silu(gate_out) * up_out)
         else:
-            if os.getenv("XPU_LLAMA_FFN") == "True":
-                out = self.ffn(x, (self.step) % 16 == 0)
-                self.step = self.step + 1
-            else:
-                out = self.down_proj(F.silu(self.gate_proj(x)) * self.up_proj(x))
+            out = self.down_proj(F.silu(self.gate_proj(x)) * self.up_proj(x))
         return out
 
 

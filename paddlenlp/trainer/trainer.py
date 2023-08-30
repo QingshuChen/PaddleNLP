@@ -383,7 +383,7 @@ class Trainer:
         self._memory_tracker.stop_and_update_metrics()
         if os.getenv("XPU_LLAMA_FFN") == "True":
             p = XPUScaleMemoryManager.instance()
-            p.init_tensor()
+            p.init(acc_step=self.args.gradient_accumulation_steps)
 
     def add_callback(self, callback):
         """
@@ -761,6 +761,9 @@ class Trainer:
                         tr_loss_step = self.training_step(model, inputs)
                 else:
                     tr_loss_step = self.training_step(model, inputs)
+                if os.getenv("XPU_LLAMA_FFN") == "True":
+                    p = XPUScaleMemoryManager.instance()
+                    p.micro_step()
 
                 tr_loss += tr_loss_step
 
