@@ -709,6 +709,8 @@ class GPTModel(GPTPretrainedModel):
             config,
             decoder_layers,
         )
+        self.attention_mask = None
+        self.input_shape_length = -1
 
     def forward(
         self, input_ids, position_ids=None, attention_mask=None, use_cache=False, cache=None, output_attentions=False
@@ -725,24 +727,32 @@ class GPTModel(GPTPretrainedModel):
 
         if not self.config.fused_softmax_with_triangular or not paddle.is_compiled_with_cuda():
             # TODO, use registered buffer
-            causal_mask = paddle.tensor.tril(
-                paddle.ones((paddle.shape(input_ids)[-1], paddle.shape(input_ids)[-1]), dtype="int64"),
-            )
-            if attention_mask is not None:
-                if attention_mask.dtype != paddle.int64:
-                    attention_mask = paddle.cast(attention_mask, dtype=paddle.int64)
-                if len(attention_mask.shape) == 2:
-                    attention_mask = attention_mask[:, None, None, :]
-                attention_mask = (1.0 - (attention_mask & causal_mask)) * -1e4
+            if self.attention_mask is None:
+                causal_mask = paddle.tensor.tril(
+                    paddle.ones((paddle.shape(input_ids)[-1], paddle.shape(input_ids)[-1]), dtype="int64"),
+                )
+                self.input_shape_length = paddle.shape(input_ids)[-1]
+                if attention_mask is not None:
+                    if attention_mask.dtype != paddle.int64:
+                        attention_mask = paddle.cast(attention_mask, dtype=paddle.int64)
+                    if len(attention_mask.shape) == 2:
+                        attention_mask = attention_mask[:, None, None, :]
+                    attention_mask = (1.0 - (attention_mask & causal_mask)) * -1e4
+                else:
+                    attention_mask = (1.0 - causal_mask) * -1e4
+                self.attention_mask = attention_mask
             else:
-                attention_mask = (1.0 - causal_mask) * -1e4
+                #print(attention_mask)
+                #print(self.input_shape_length)
+                #print(paddle.shape(input_ids)[-1])
+                assert(self.input_shape_length == paddle.shape(input_ids)[-1])
 
         encoder_outputs = self.decoder(
             embedding_output,
             memory=None,
             tgt_mask=None
             if (self.config.fused_softmax_with_triangular and self.training)
-            else attention_mask,  # use softmax_mask_fuse_upper_triangle
+            else self.attention_mask,  # use softmax_mask_fuse_upper_triangle
             use_cache=use_cache,
             cache=cache,
             output_attentions=output_attentions,
