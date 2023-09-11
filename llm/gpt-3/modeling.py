@@ -465,6 +465,8 @@ class TransformerDecoderLayer(nn.Layer):
                     gather_output=False,
                     has_bias=True,
                     fuse_matmul_bias=self.config.fused_linear,
+                    cal_type=XTECalType.cdnn_int16,
+                    intermediate_dtype=XTEDataType.int16,
                 )
                 self.linear2 = XPURowParallelLinear(
                     config.intermediate_size,
@@ -472,6 +474,8 @@ class TransformerDecoderLayer(nn.Layer):
                     input_is_parallel=True,
                     has_bias=True,
                     fuse_matmul_bias=self.config.fused_linear,
+                    cal_type=XTECalType.cdnn_int16,
+                    intermediate_dtype=XTEDataType.int16,
                 )
             else:
                 self.linear1 = fleet.meta_parallel.ColumnParallelLinear(
