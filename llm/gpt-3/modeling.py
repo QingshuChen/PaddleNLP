@@ -463,18 +463,16 @@ class TransformerDecoderLayer(nn.Layer):
                     config.hidden_size,
                     config.intermediate_size,
                     gather_output=False,
-                    has_bias=True,
+                    has_bias=False,
                     fuse_matmul_bias=self.config.fused_linear,
-                    cal_type=XTECalType.cdnn_int16,
                     intermediate_dtype=XTEDataType.int16,
                 )
                 self.linear2 = XPURowParallelLinear(
                     config.intermediate_size,
                     config.hidden_size,
                     input_is_parallel=True,
-                    has_bias=True,
+                    has_bias=False,
                     fuse_matmul_bias=self.config.fused_linear,
-                    cal_type=XTECalType.cdnn_int16,
                     intermediate_dtype=XTEDataType.int16,
                 )
             else:
