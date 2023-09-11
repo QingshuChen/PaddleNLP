@@ -176,6 +176,7 @@ GPT_PRETRAINED_RESOURCE_FILES_MAP = {
         "gpt-cpm-large-cn": "https://bj.bcebos.com/paddlenlp/models/transformers/gpt/gpt-cpm-large-cn.pdparams",
         "gpt-cpm-small-cn-distill": "https://bj.bcebos.com/paddlenlp/models/transformers/gpt/gpt-cpm-small-cn-distill.pdparams",
         "gpt2-medium-en": "https://bj.bcebos.com/paddlenlp/models/transformers/gpt/gpt2-medium-en.pdparams",
+        "gpt3-13B-en": "https://bj.bcebos.com/paddlenlp/models/transformers/gpt/gpt2-medium-en.pdparams",
     }
 }
 
@@ -284,7 +285,7 @@ class GPTConfig(PretrainedConfig):
         tensor_parallel_degree: int = 1,
         tensor_parallel_output: bool = True,
         output_attentions: bool = False,
-        ignore_index: int = 0,
+        ignore_index: int = -100,
         use_flash_attention: bool = False,
         fused_linear: bool = False,
         fuse_attention_qkv=False,
