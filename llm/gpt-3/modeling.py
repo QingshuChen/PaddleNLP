@@ -16,6 +16,7 @@ import collections
 import math
 from functools import partial
 
+import os
 import numpy as np
 import paddle
 import paddle.incubate as incubate
@@ -33,6 +34,10 @@ from paddle.distributed.fleet.utils import recompute
 
 from paddlenlp.transformers import PretrainedModel, register_base_model
 from paddlenlp.transformers.model_outputs import CausalLMOutputWithCrossAttentions
+from paddle_xpu.ops.transformer_engine.model.llama import FFN
+from paddle_xpu.ops.transformer_engine.xte_meta import *
+from paddle_xpu.ops.transformer_engine.linear import ColumnParallelLinear  as XPUColumnParallelLinear
+from paddle_xpu.ops.transformer_engine.linear import RowParallelLinear  as XPURowParallelLinear
 
 try:
     from paddle.nn.functional.flash_attention import flash_attention
@@ -453,20 +458,36 @@ class TransformerDecoderLayer(nn.Layer):
         self.self_attn = MultiHeadAttention(config=config)
 
         if config.tensor_parallel_degree > 1:
-            self.linear1 = fleet.meta_parallel.ColumnParallelLinear(
-                config.hidden_size,
-                config.intermediate_size,
-                gather_output=False,
-                has_bias=True,
-                fuse_matmul_bias=self.config.fused_linear,
-            )
-            self.linear2 = fleet.meta_parallel.RowParallelLinear(
-                config.intermediate_size,
-                config.hidden_size,
-                input_is_parallel=True,
-                has_bias=True,
-                fuse_matmul_bias=self.config.fused_linear,
-            )
+            if os.getenv("XPU_GPT3_FFN") == "True":
+                self.linear1 = XPUColumnParallelLinear(
+                    config.hidden_size,
+                    config.intermediate_size,
+                    gather_output=False,
+                    has_bias=True,
+                    fuse_matmul_bias=self.config.fused_linear,
+                )
+                self.linear2 = XPURowParallelLinear(
+                    config.intermediate_size,
+                    config.hidden_size,
+                    input_is_parallel=True,
+                    has_bias=True,
+                    fuse_matmul_bias=self.config.fused_linear,
+                )
+            else:
+                self.linear1 = fleet.meta_parallel.ColumnParallelLinear(
+                    config.hidden_size,
+                    config.intermediate_size,
+                    gather_output=False,
+                    has_bias=True,
+                    fuse_matmul_bias=self.config.fused_linear,
+                )
+                self.linear2 = fleet.meta_parallel.RowParallelLinear(
+                    config.intermediate_size,
+                    config.hidden_size,
+                    input_is_parallel=True,
+                    has_bias=True,
+                    fuse_matmul_bias=self.config.fused_linear,
+                )
         else:
             self.linear1 = nn.Linear(config.hidden_size, config.intermediate_size, bias_attr=True)
             self.linear2 = nn.Linear(config.intermediate_size, config.hidden_size, bias_attr=True)
