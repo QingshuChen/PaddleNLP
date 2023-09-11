@@ -123,13 +123,23 @@ class MultiHeadAttention(nn.Layer):
             self.num_attention_heads = config.num_attention_heads // config.tensor_parallel_degree
 
             if config.fuse_attention_qkv:
-                self.qkv_proj = fleet.meta_parallel.ColumnParallelLinear(
-                    config.hidden_size,
-                    3 * config.hidden_size,
-                    has_bias=True,
-                    gather_output=False,
-                    fuse_matmul_bias=config.fused_linear,
-                )
+                if os.getenv("XPU_GPT3_FFN") == "True":
+                    self.qkv_proj = XPUColumnParallelLinear(
+                        config.hidden_size,
+                        3 * config.hidden_size,
+                        has_bias=False,
+                        gather_output=False,
+                        fuse_matmul_bias=config.fused_linear,
+                        intermediate_dtype=XTEDataType.int16,
+                    )
+                else:
+                    self.qkv_proj = fleet.meta_parallel.ColumnParallelLinear(
+                        config.hidden_size,
+                        3 * config.hidden_size,
+                        has_bias=True,
+                        gather_output=False,
+                        fuse_matmul_bias=config.fused_linear,
+                    )
             else:
                 self.q_proj = fleet.meta_parallel.ColumnParallelLinear(
                     config.hidden_size,
@@ -155,13 +165,23 @@ class MultiHeadAttention(nn.Layer):
                     fuse_matmul_bias=config.fused_linear,
                 )
 
-            self.out_proj = fleet.meta_parallel.RowParallelLinear(
-                config.hidden_size,
-                config.hidden_size,
-                has_bias=True,
-                input_is_parallel=True,
-                fuse_matmul_bias=config.fused_linear,
-            )
+            if os.getenv("XPU_GPT3_FFN") == "True":
+                self.out_proj = XPURowParallelLinear(
+                    config.hidden_size,
+                    config.hidden_size,
+                    has_bias=False,
+                    input_is_parallel=True,
+                    fuse_matmul_bias=config.fused_linear,
+                    intermediate_dtype=XTEDataType.int16,
+                )
+            else:
+                self.out_proj = fleet.meta_parallel.RowParallelLinear(
+                    config.hidden_size,
+                    config.hidden_size,
+                    has_bias=True,
+                    input_is_parallel=True,
+                    fuse_matmul_bias=config.fused_linear,
+                )
         else:
             if self.config.fuse_attention_qkv:
                 self.qkv_proj = nn.Linear(config.hidden_size, 3 * config.hidden_size, bias_attr=True)
