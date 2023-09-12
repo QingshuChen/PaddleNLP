@@ -55,8 +55,8 @@ run_pretrain.py \
     --split 949,50,1 \
     --max_seq_length 1024 \
     --per_device_train_batch_size 2 \
-    --tensor_parallel_degree 8 \
-    --pipeline_parallel_degree 4 \
+    --tensor_parallel_degree 4 \
+    --pipeline_parallel_degree 8 \
     --fuse_attention_qkv 1 \
     --use_flash_attention 0 \
     --learning_rate 0.00001 \

@@ -107,6 +107,8 @@ class MultiHeadAttention(nn.Layer):
 
         self.config = config
 
+        self.attn_mask = None
+
         # Recompute defaults to False and is controlled by Trainer
         self.enable_recompute = False
 
@@ -300,12 +302,14 @@ class MultiHeadAttention(nn.Layer):
             product = product.scale(self.config.scale_qk_coeff)
 
         # softmax_mask_fuse_upper_triangle is not supported sif paddle is not compiled with cuda/rocm
-        if not paddle.is_compiled_with_cuda():
-            attn_mask = get_triangle_upper_mask(product, attn_mask)
+        if self.attn_mask is None:
+            self.attn_mask = get_triangle_upper_mask(product, attn_mask)
+            self.attn_mask = self.attn_mask[:,0:1,:,:]
 
-        if attn_mask is not None:
-            product = product + attn_mask
-            weights = F.softmax(product)
+        if self.attn_mask is not None:
+            #product = product + attn_mask
+            #weights = F.softmax(product)
+            weights = incubate.softmax_mask_fuse(product, self.attn_mask)
         else:
             weights = incubate.softmax_mask_fuse_upper_triangle(product)
 
@@ -785,11 +789,7 @@ class GPTModel(GPTPretrainedModel):
                     attention_mask = (1.0 - causal_mask) * -1e4
                 self.attention_mask = attention_mask
             else:
-                #print(attention_mask)
-                #print(self.input_shape_length)
-                #print(paddle.shape(input_ids)[-1])
                 assert(self.input_shape_length == paddle.shape(input_ids)[-1])
-
         encoder_outputs = self.decoder(
             embedding_output,
             memory=None,
