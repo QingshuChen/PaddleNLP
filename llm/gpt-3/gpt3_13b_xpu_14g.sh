@@ -10,6 +10,7 @@ export LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu/:$LD_LIBRARY_PATH  #rdma path
 #export XPU_PADDLE_DEBUG=1
 #export GLOG_v=10
 
+export XPU_FC_AUTOTUNE_FILE="/paddle/PaddleNLP/llm/gpt-3/fc_autofile.txt"
 #export BKCL_PCIE_RING=1
 export BKCL_CCIX_RING=1
 export BKCL_SOCKET_IFNAME=xgbe0
