@@ -539,7 +539,7 @@ class LlamaAttention(nn.Layer):
                     3 * self.hidden_size,
                     has_bias=False,
                     gather_output=False,
-                    intermediate_dtype=XTEDataType.int16,
+                    #intermediate_dtype=XTEDataType.int16,
                 )
             else:
                 self.q_proj = ColumnParallelLinear(
@@ -603,7 +603,7 @@ class LlamaAttention(nn.Layer):
                 self.hidden_size,
                 has_bias=False,
                 input_is_parallel=True,
-                intermediate_dtype=XTEDataType.int16,
+                #intermediate_dtype=XTEDataType.int16,
             )
         else:
             self.o_proj = nn.Linear(
@@ -1180,10 +1180,15 @@ class LlamaPretrainingCriterion(paddle.nn.Layer):
                 self.loss_func = paddle.nn.CrossEntropyLoss(reduction="none", ignore_index=self.ignore_index)
 
         with paddle.amp.auto_cast(False):
-            masked_lm_loss = self.loss_func(prediction_scores.astype("float32"), masked_lm_labels.unsqueeze(2))
+            masked_lm_loss = self.loss_func(prediction_scores, masked_lm_labels.unsqueeze(2))
             # skip ignore_index which loss == 0
-            masked_lm_loss = masked_lm_loss[masked_lm_loss > 0].astype("float32")
+            masked_lm_loss = masked_lm_loss[masked_lm_loss > 0]
             loss = paddle.mean(masked_lm_loss)
+        #with paddle.amp.auto_cast(False):
+        #    masked_lm_loss = self.loss_func(prediction_scores.astype("float32"), masked_lm_labels.unsqueeze(2))
+        #    # skip ignore_index which loss == 0
+        #    masked_lm_loss = masked_lm_loss[masked_lm_loss > 0].astype("float32")
+        #    loss = paddle.mean(masked_lm_loss)
 
         return loss
 

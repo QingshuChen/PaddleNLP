@@ -56,7 +56,6 @@ python -u  -m paddle.distributed.launch \
     --max_seq_length 512 \
     --per_device_train_batch_size 4 \
     --gradient_accumulation_steps 64 \
-    --per_device_eval_batch_size 256 \
     --use_flash_attention 0 \
     --use_fused_rms_norm 0 \
     --fuse_attention_qkv 1 \
@@ -64,7 +63,7 @@ python -u  -m paddle.distributed.launch \
     --tensor_parallel_degree 8 \
     --pipeline_parallel_degree 4 \
     --virtual_pp_degree 1 \
-    --sequence_parallel 0 \
+    --sequence_parallel 1 \
     --learning_rate 0.00001 \
     --min_learning_rate 0.000001 \
     --max_steps 10000 \
@@ -81,5 +80,4 @@ python -u  -m paddle.distributed.launch \
     --recompute 0 \
     --recompute_granularity core_attn \
     --do_train \
-    --do_eval \
     --device "xpu"
