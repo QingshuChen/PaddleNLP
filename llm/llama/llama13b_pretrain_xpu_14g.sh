@@ -53,7 +53,7 @@ python -u  -m paddle.distributed.launch \
     --input_dir "./data" \
     --output_dir "output/$task_name" \
     --split 949,50,1 \
-    --max_seq_length 512 \
+    --max_seq_length 1024 \
     --per_device_train_batch_size 4 \
     --gradient_accumulation_steps 64 \
     --use_flash_attention 0 \
