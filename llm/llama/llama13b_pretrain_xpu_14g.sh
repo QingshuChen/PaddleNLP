@@ -80,4 +80,5 @@ python -u  -m paddle.distributed.launch \
     --recompute 0 \
     --recompute_granularity core_attn \
     --do_train \
+    --pipeline_parallel_config "disable_partial_send_recv" \
     --device "xpu"

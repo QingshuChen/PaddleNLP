@@ -912,12 +912,10 @@ class TrainingArguments:
                             "The enable_stage1_tensor_fusion or enable_stage1_overlap is not supported "
                             "by current version of Paddle. Please try latest develop Paddle."
                         )
-                if self.device == "gpu":
-                    paddle.device.cuda.synchronize()
+                paddle.device.synchronize()
                 start_time = time.time()
                 fleet.init(is_collective=True, strategy=strategy)
-                if self.device == "gpu":
-                    paddle.device.cuda.synchronize()
+                paddle.device.synchronize()
                 elapsed = time.time() - start_time
                 logger.info("NCCL-Connection costs {:.2f} ms.".format(elapsed))
 
