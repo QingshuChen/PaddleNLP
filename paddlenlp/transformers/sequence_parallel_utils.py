@@ -26,6 +26,10 @@ from paddle.framework import core
 from paddle.nn import functional as F
 from paddle.nn.layer.layers import Layer
 
+from paddle_xpu.ops.transformer_engine.xte_meta import *
+from paddle_xpu.ops.transformer_engine.linear import *
+from paddle_xpu_nn import xte_fc, xte_fc_bias, xte_fc_quant, xte_fc_bias_quant
+
 __all__ = [
     "GatherOp",
     "ScatterOp",
@@ -219,7 +223,6 @@ def is_fused_matmul_bias_supported():
     else:
         return False
 
-
 class ColumnSequenceParallelLinear(Layer):
     def __init__(
         self,
@@ -322,6 +325,114 @@ class ColumnSequenceParallelLinear(Layer):
         return output
 
 
+class XPUColumnSequenceParallelLinear(ColumnSequenceParallelLinear):
+    def __init__(
+        self,
+        in_features,
+        out_features,
+        weight_attr=None,
+        has_bias=None,
+        gather_output=True,
+        fuse_matmul_bias=False,
+        mp_group=None,
+        name=None,
+        input_dtype=XTEDataType.fp32,
+        output_dtype=XTEDataType.fp32,
+        cal_type=XTECalType.cdnn_int16,
+        intermediate_dtype=XTEDataType.scale_fp16,
+        non_xte_mode=False,
+    ):
+        super(XPUColumnSequenceParallelLinear, self).__init__(
+            in_features,
+            out_features,
+            weight_attr,
+            has_bias,
+            gather_output,
+            fuse_matmul_bias,
+            mp_group,
+            name,
+        )
+
+        self.input_dtype = input_dtype
+        self.output_dtype = output_dtype
+        self.cal_type = cal_type
+        self.intermediate_dtype = intermediate_dtype
+        self.non_xte_mode = non_xte_mode
+        if non_xte_mode:
+            return
+
+
+        assert fuse_matmul_bias is False
+        if fuse_matmul_bias:
+            if not is_fused_matmul_bias_supported():
+                raise NotImplementedError(
+                    "You set fuse_matmul_bias=True in ColumnSequenceParallelLinear, "
+                    "however, the paddle you are using not support this operation. "
+                    "Please set fuse_matmul_bias=False or use paddle compiled "
+                    "with cuda 11.6 or higher."
+                )
+                from paddle.incubate.nn.functional import fused_linear
+
+                self.linear = fused_linear
+        self.scale_weight = None
+        self.weight_index = -1
+        if intermediate_dtype != XTEDataType.fp32:
+            self.scale_weight = self.create_tensor("weight")
+            self.register_buffer(
+                self.scale_weight.name.replace(".", "_"),
+                self.scale_weight,
+                persistable=True,
+            )
+            paddle.assign(
+                paddle.empty(self.weight.shape, dtype="float16"), self.scale_weight
+            )  # place holder
+            self.scale_weight.stop_gradient = True
+        ins = XPUScaleMemoryManager.instance()
+        if intermediate_dtype == XTEDataType.int16:
+            self.max_tensor = self.create_tensor("max_tensor")
+            self.register_buffer(
+                self.max_tensor.name.replace(".", "_"),
+                self.max_tensor,
+                persistable=True,
+            )
+            paddle.assign(
+                paddle.empty([ins.get_num_cdnn() * 3], dtype="float32"), self.max_tensor
+            )  # place holder
+            self.max_tensor.stop_gradient = True
+            self.weight_index = -1
+        else:
+            self.weight_index = XPUScaleMemoryManager.instance().malloc_meta(1)
+            self.input_index = ins.malloc_meta(2)
+            self.output_index = ins.malloc_meta(2)
+        self.xte_weight = XTETensor(
+            self.weight, self.scale_weight, None, self.weight_index, -1
+        )
+
+    def forward(self, x):
+        # sequence parallelism is same as model parallelism
+        # if sequence parallel is true, input shape is [s, b, h]
+        # else input shape is [b, s, h]
+        if self.is_mp:
+            input_parallel = AllGatherOp.apply(x)
+        else:
+            input_parallel = x
+        #output = self.linear(input_parallel, self.weight, self.bias, name=self._name)
+        ins = XPUScaleMemoryManager.instance()
+        is_first_microbatch = ins.is_first_microstep()
+        quant_x = paddle.empty(input_parallel.shape, dtype="int16")
+        output_parallel = xte_fc_quant(
+            input_parallel,
+            self.weight,
+            quant_x,
+            self.scale_weight,
+            self.max_tensor,
+            is_first_microbatch,
+            XTECalType.cdnn_int16.value,
+            XTEDataType.fp32.value,
+        )
+        return output_parallel
+
+
 class RowSequenceParallelLinear(Layer):
     def __init__(
         self,
@@ -420,6 +531,108 @@ class RowSequenceParallelLinear(Layer):
         input_parallel = x
         if self.is_mp:
             output_parallel = self.linear(input_parallel, self.weight, name=self._name)
+            # if self.bias is not none, sequence parallel will use
+            # register_hook to all_reduce self.bias
+            output_ = ReduceScatterOp.apply(output_parallel)
+            output = output_ + self.bias if self.bias is not None else output_
+        else:
+            output = self.linear(input_parallel, self.weight, self.bias, name=self._name)
+        return output
+
+
+class XPURowSequenceParallelLinear(RowSequenceParallelLinear):
+    def __init__(
+        self,
+        in_features,
+        out_features,
+        weight_attr=None,
+        has_bias=True,
+        input_is_parallel=False,
+        fuse_matmul_bias=False,
+        mp_group=None,
+        name=None,
+        input_dtype=XTEDataType.fp32,
+        output_dtype=XTEDataType.fp32,
+        cal_type=XTECalType.cdnn_int16,
+        intermediate_dtype=XTEDataType.scale_fp16,
+        non_xte_mode=False,
+    ):
+        super(XPURowSequenceParallelLinear, self).__init__(
+            in_features,
+            out_features,
+            weight_attr,
+            has_bias,
+            input_is_parallel,
+            fuse_matmul_bias,
+            mp_group,
+            name,
+        )
+
+        self.input_dtype = input_dtype
+        self.output_dtype = output_dtype
+        self.cal_type = cal_type
+        self.intermediate_dtype = intermediate_dtype
+        self.non_xte_mode = non_xte_mode
+        if non_xte_mode:
+            return
+
+        assert fuse_matmul_bias is False
+        self.scale_weight = None
+        self.weight_index = -1
+        if intermediate_dtype != XTEDataType.fp32:
+            self.scale_weight = self.create_tensor("weight")
+            self.register_buffer(
+                self.scale_weight.name.replace(".", "_"),
+                self.scale_weight,
+                persistable=True,
+            )
+            paddle.assign(
+                paddle.empty(self.weight.shape, dtype="float16"), self.scale_weight
+            )  # place holder
+            self.scale_weight.stop_gradient = True
+        ins = XPUScaleMemoryManager.instance()
+        if intermediate_dtype == XTEDataType.int16:
+            self.max_tensor = self.create_tensor("max_tensor")
+            self.register_buffer(
+                self.max_tensor.name.replace(".", "_"),
+                self.max_tensor,
+                persistable=True,
+            )
+            paddle.assign(
+                paddle.empty([ins.get_num_cdnn() * 3], dtype="float32"), self.max_tensor
+            )  # place holder
+            self.max_tensor.stop_gradient = True
+            self.weight_index = -1
+        else:
+            self.weight_index = XPUScaleMemoryManager.instance().malloc_meta(1)
+            self.input_index = ins.malloc_meta(2)
+            self.output_index = ins.malloc_meta(2)
+        self.xte_weight = XTETensor(
+            self.weight, self.scale_weight, None, self.weight_index, -1
+        )
+
+        if fuse_matmul_bias:
+            self.fuse_matmul_bias = 1
+        else:
+            self.fuse_matmul_bias = 0
+
+    def forward(self, x):
+        input_parallel = x
+        assert self.is_mp
+        ins = XPUScaleMemoryManager.instance()
+        is_first_microbatch = ins.is_first_microstep()
+        if self.is_mp:
+            quant_x = paddle.empty(x.shape, dtype="int16")
+            output_parallel = xte_fc_quant(
+                input_parallel,
+                self.weight,
+                quant_x,
+                self.scale_weight,
+                self.max_tensor,
+                is_first_microbatch,
+                XTECalType.cdnn_int16.value,
+                XTEDataType.fp32.value,
+            )
             # if self.bias is not none, sequence parallel will use
             # register_hook to all_reduce self.bias
             output_ = ReduceScatterOp.apply(output_parallel)

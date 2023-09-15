@@ -125,7 +125,7 @@ class MultiHeadAttention(nn.Layer):
             self.num_attention_heads = config.num_attention_heads // config.tensor_parallel_degree
 
             if config.fuse_attention_qkv:
-                if os.getenv("XPU_GPT3_FFN") == "True":
+                if os.getenv("XPU_TRANSFORMER_ENGINE") == "True":
                     self.qkv_proj = XPUColumnParallelLinear(
                         config.hidden_size,
                         3 * config.hidden_size,
@@ -167,7 +167,7 @@ class MultiHeadAttention(nn.Layer):
                     fuse_matmul_bias=config.fused_linear,
                 )
 
-            if os.getenv("XPU_GPT3_FFN") == "True":
+            if os.getenv("XPU_TRANSFORMER_ENGINE") == "True":
                 self.out_proj = XPURowParallelLinear(
                     config.hidden_size,
                     config.hidden_size,
@@ -482,7 +482,7 @@ class TransformerDecoderLayer(nn.Layer):
         self.self_attn = MultiHeadAttention(config=config)
 
         if config.tensor_parallel_degree > 1:
-            if os.getenv("XPU_GPT3_FFN") == "True":
+            if os.getenv("XPU_TRANSFORMER_ENGINE") == "True":
                 self.linear1 = XPUColumnParallelLinear(
                     config.hidden_size,
                     config.intermediate_size,

@@ -1,8 +1,7 @@
 export PYTHONPATH=/paddle/PaddleNLP/
 export XPU_PADDLE_FC_INT32_WITH_LL=1
 #export XPU_PADDLE_L3_SIZE=40060288
-export XPU_GPT3_FFN=True
-export XPU_LLAMA_FFN=True
+export XPU_TRANSFORMER_ENGINE=True
 export LD_LIBRARY_PATH=/paddle/baidu/xpu/fast_paddle/build/kernel_plugin/so:$LD_LIBRARY_PATH
 export LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu/:$LD_LIBRARY_PATH  #rdma path
 #export XPU_DEBUG=0X20

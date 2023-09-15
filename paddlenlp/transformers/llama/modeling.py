@@ -61,8 +61,10 @@ from paddlenlp.utils.log import logger
 
 from ..sequence_parallel_utils import (
     ColumnSequenceParallelLinear,
+    XPUColumnSequenceParallelLinear,
     GatherOp,
     RowSequenceParallelLinear,
+    XPURowSequenceParallelLinear,
     ScatterOp,
     mark_as_sequence_parallel_parameter,
 )
@@ -404,30 +406,43 @@ class LlamaMLP(nn.Layer):
         self.tensor_parallel_degree = config.tensor_parallel_degree
         self.fuse_attention_ffn = config.fuse_attention_ffn
 
-        if os.getenv("XPU_LLAMA_FFN") == "True":
-            print("xpu_llama_ffn.......................................................")
-            self.ffn = FFN(
-                self.hidden_size, self.intermediate_size,
-                intermediate_dtype=XTEDataType.int16,
-                fuse_attention_ffn=config.fuse_attention_ffn,
-            ) 
-            return
+        #if os.getenv("XPU_LLAMA_FFN") == "True":
+        #    print("xpu_llama_ffn.......................................................")
+        #    self.ffn = FFN(
+        #        self.hidden_size, self.intermediate_size,
+        #        intermediate_dtype=XTEDataType.int16,
+        #        fuse_attention_ffn=config.fuse_attention_ffn,
+        #    ) 
+        #    return
 
         if config.sequence_parallel:
-            ColumnParallelLinear = ColumnSequenceParallelLinear
-            RowParallelLinear = RowSequenceParallelLinear
+            if os.getenv("XPU_TRANSFORMER_ENGINE") == "True":
+                ColumnParallelLinear = XPUColumnSequenceParallelLinear
+                RowParallelLinear = XPURowSequenceParallelLinear
+            else:
+                ColumnParallelLinear = ColumnSequenceParallelLinear
+                RowParallelLinear = RowSequenceParallelLinear
         else:
             ColumnParallelLinear = fleet.meta_parallel.ColumnParallelLinear
             RowParallelLinear = fleet.meta_parallel.RowParallelLinear
 
         if config.tensor_parallel_degree > 1:
             if config.fuse_attention_ffn:
-                self.gate_up_fused_proj = ColumnParallelLinear(
-                    self.hidden_size,
-                    self.intermediate_size * 2,
-                    gather_output=False,
-                    has_bias=False,
-                )
+                if os.getenv("XPU_TRANSFORMER_ENGINE") == "True":
+                    self.gate_up_fused_proj = ColumnParallelLinear(
+                        self.hidden_size,
+                        self.intermediate_size * 2,
+                        gather_output=False,
+                        has_bias=False,
+                        intermediate_dtype=XTEDataType.int16,
+                    )
+                else:
+                    self.gate_up_fused_proj = ColumnParallelLinear(
+                        self.hidden_size,
+                        self.intermediate_size * 2,
+                        gather_output=False,
+                        has_bias=False,
+                    )
             else:
                 self.gate_proj = ColumnParallelLinear(
                     self.hidden_size,
@@ -442,12 +457,21 @@ class LlamaMLP(nn.Layer):
                     has_bias=False,
                 )
 
-            self.down_proj = RowParallelLinear(
-                self.intermediate_size,
-                self.hidden_size,
-                input_is_parallel=True,
-                has_bias=False,
-            )
+            if os.getenv("XPU_TRANSFORMER_ENGINE") == "True":
+                self.down_proj = RowParallelLinear(
+                    self.intermediate_size,
+                    self.hidden_size,
+                    input_is_parallel=True,
+                    has_bias=False,
+                    intermediate_dtype=XTEDataType.int16,
+                )
+            else:
+                self.down_proj = RowParallelLinear(
+                    self.intermediate_size,
+                    self.hidden_size,
+                    input_is_parallel=True,
+                    has_bias=False,
+                )
         else:
             if config.fuse_attention_ffn:
                 self.gate_up_fused_proj = nn.Linear(self.hidden_size, self.intermediate_size * 2, bias_attr=False)
@@ -522,10 +546,14 @@ class LlamaAttention(nn.Layer):
                 self.rope_fusion_level = None
 
         if config.sequence_parallel:
-            ColumnParallelLinear = ColumnSequenceParallelLinear
-            RowParallelLinear = RowSequenceParallelLinear
+            if os.getenv("XPU_TRANSFORMER_ENGINE") == "True":
+                ColumnParallelLinear = XPUColumnSequenceParallelLinear
+                RowParallelLinear = XPURowSequenceParallelLinear
+            else:
+                ColumnParallelLinear = ColumnSequenceParallelLinear
+                RowParallelLinear = RowSequenceParallelLinear
         else:
-            if "xpu" in paddle.device.get_device():
+            if os.getenv("XPU_TRANSFORMER_ENGINE") == "True":
                 ColumnParallelLinear = XPUColumnParallelLinear
                 RowParallelLinear = XPURowParallelLinear
             else:
@@ -534,13 +562,21 @@ class LlamaAttention(nn.Layer):
 
         if config.tensor_parallel_degree > 1:
             if self.fuse_attention_qkv:
-                self.qkv_proj = ColumnParallelLinear(
-                    self.hidden_size,
-                    3 * self.hidden_size,
-                    has_bias=False,
-                    gather_output=False,
-                    #intermediate_dtype=XTEDataType.int16,
-                )
+                if os.getenv("XPU_TRANSFORMER_ENGINE") == "True":
+                    self.qkv_proj = ColumnParallelLinear(
+                        self.hidden_size,
+                        3 * self.hidden_size,
+                        has_bias=False,
+                        gather_output=False,
+                        intermediate_dtype=XTEDataType.int16,
+                    )
+                else:
+                    self.qkv_proj = ColumnParallelLinear(
+                        self.hidden_size,
+                        3 * self.hidden_size,
+                        has_bias=False,
+                        gather_output=False,
+                    )
             else:
                 self.q_proj = ColumnParallelLinear(
                     self.hidden_size,
@@ -598,13 +634,21 @@ class LlamaAttention(nn.Layer):
                 )
 
         if config.tensor_parallel_degree > 1:
-            self.o_proj = RowParallelLinear(
-                self.hidden_size,
-                self.hidden_size,
-                has_bias=False,
-                input_is_parallel=True,
-                #intermediate_dtype=XTEDataType.int16,
-            )
+            if os.getenv("XPU_TRANSFORMER_ENGINE") == "True":
+                self.o_proj = RowParallelLinear(
+                    self.hidden_size,
+                    self.hidden_size,
+                    has_bias=False,
+                    input_is_parallel=True,
+                    intermediate_dtype=XTEDataType.int16,
+                )
+            else:
+                self.o_proj = RowParallelLinear(
+                    self.hidden_size,
+                    self.hidden_size,
+                    has_bias=False,
+                    input_is_parallel=True,
+                )
         else:
             self.o_proj = nn.Linear(
                 self.hidden_size,

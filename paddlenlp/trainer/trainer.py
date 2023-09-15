@@ -381,7 +381,7 @@ class Trainer:
 
         # very last
         self._memory_tracker.stop_and_update_metrics()
-        if os.getenv("XPU_LLAMA_FFN") == "True":
+        if os.getenv("XPU_TRANSFORMER_ENGINE") == "True":
             p = XPUScaleMemoryManager.instance()
             p.init(acc_step=self.args.gradient_accumulation_steps)
 
@@ -761,7 +761,7 @@ class Trainer:
                         tr_loss_step = self.training_step(model, inputs)
                 else:
                     tr_loss_step = self.training_step(model, inputs)
-                if os.getenv("XPU_LLAMA_FFN") == "True":
+                if os.getenv("XPU_TRANSFORMER_ENGINE") == "True":
                     p = XPUScaleMemoryManager.instance()
                     p.micro_step()
 
