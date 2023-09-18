@@ -940,9 +940,9 @@ class TrainingArguments:
                 assert self.hybrid_parallel_topo_order in ["pp_first", "sharding_first"]
 
                 if self.hybrid_parallel_topo_order == "pp_first":
-                    order = ["dp", "pp", "sharding", "mp"]
+                    order = ["dp", "pp", "sharding", "mp", "sep"]
                 if self.hybrid_parallel_topo_order == "sharding_first":
-                    order = ["dp", "sharding", "pp", "mp"]
+                    order = ["dp", "sharding", "pp", "mp", "sep"]
 
                 hybrid_configs = {
                     "dp_degree": self.data_parallel_degree,
