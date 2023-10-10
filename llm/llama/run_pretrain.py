@@ -374,6 +374,11 @@ class PretrainingTrainer(Trainer):
 
 
 def main():
+
+    # if int(os.environ.get("XPU_FC_AUTOTUNE", 0)) > 0:
+        # os.environ["XPU_FC_AUTOTUNE_FILE"] = f"./autotune_result_fc_at_{paddle.distributed.get_rank()}"
+        # print(f"XPU_FC_AUTOTUNE_FILE=`{os.environ['XPU_FC_AUTOTUNE_FILE']}`")
+
     parser = PdArgumentParser((ModelArguments, DataArguments, PreTrainingArguments))
     if len(sys.argv) == 2 and sys.argv[1].endswith(".json"):
         model_args, data_args, training_args = parser.parse_json_file(json_file=os.path.abspath(sys.argv[1]))
