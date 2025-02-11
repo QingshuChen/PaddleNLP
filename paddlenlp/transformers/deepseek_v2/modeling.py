@@ -35,6 +35,7 @@ from paddle.distributed.fleet.meta_parallel import get_rng_state_tracker
 from paddle.distributed.fleet.utils import recompute
 from paddle.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
 
+from . import fusion_ops
 try:
     from paddle.incubate.nn.functional import fused_rotary_position_embedding
 except ImportError:
@@ -322,6 +323,13 @@ class DeepseekV2RMSNorm(nn.Layer):
             mark_as_sequence_parallel_parameter(self.weight)
 
     def forward(self, hidden_states):
+        if self.config.use_fused_rms_norm:
+            if self.weight.dtype != hidden_states.dtype:
+                hidden_states = paddle.cast(hidden_states, self.weight.dtype)
+            return fusion_ops.fusion_rms_norm(
+                hidden_states, self.weight, self.variance_epsilon, self.config.use_fast_layer_norm
+            )
+
         if paddle.in_dynamic_mode():
             with paddle.amp.auto_cast(False):
                 hidden_states = hidden_states.astype("float32")
@@ -567,24 +575,35 @@ def apply_rotary_pos_emb(q, k, cos, sin, position_ids):
     Returns:
         `tuple(torch.Tensor)` comprising of the query and key tensors rotated using the Rotary Position Embedding.
     """
-    if position_ids is None:
-        # Note: Only for MixtralForCausalLMPipe model pretraining
-        cos = cos[:, : q.shape[1], :, :]  # [bs, seq_len, 1, axis]
-        sin = sin[:, : q.shape[1], :, :]  # [bs, seq_len, 1, axis]
-    else:
-        cos = cos.squeeze(axis=[0, 2])  # [seq_len, axis]
-        sin = sin.squeeze(axis=[0, 2])  # [seq_len, axis]
-        cos = cos[position_ids].unsqueeze(2)  # [bs, seq_len, 1, axis]
-        sin = sin[position_ids].unsqueeze(2)  # [bs, seq_len, 1, axis]
-
     b, s, h, d = q.shape
     q = q.reshape([b, s, h, d // 2, 2]).transpose([0, 1, 2, 4, 3]).reshape([b, s, h, d])
 
     b, s, h, d = k.shape
     k = k.reshape([b, s, h, d // 2, 2]).transpose([0, 1, 2, 4, 3]).reshape([b, s, h, d])
+    try:
+        from paddle.incubate.nn.functional import fused_rotary_position_embedding
+        q_embed, k_embed, _ = fused_rotary_position_embedding(
+                    q,
+                    k,
+                    None,
+                    sin=sin,
+                    cos=cos,
+                    position_ids=position_ids,
+                    use_neox_rotary_style=False,
+        )
+    except:
+        if position_ids is None:
+            # Note: Only for MixtralForCausalLMPipe model pretraining
+            cos = cos[:, : q.shape[1], :, :]  # [bs, seq_len, 1, axis]
+            sin = sin[:, : q.shape[1], :, :]  # [bs, seq_len, 1, axis]
+        else:
+            cos = cos.squeeze(axis=[0, 2])  # [seq_len, axis]
+            sin = sin.squeeze(axis=[0, 2])  # [seq_len, axis]
+            cos = cos[position_ids].unsqueeze(2)  # [bs, seq_len, 1, axis]
+            sin = sin[position_ids].unsqueeze(2)  # [bs, seq_len, 1, axis]
 
-    q_embed = (q * cos) + (rotate_half(q) * sin)
-    k_embed = (k * cos) + (rotate_half(k) * sin)
+        q_embed = (q * cos) + (rotate_half(q) * sin)
+        k_embed = (k * cos) + (rotate_half(k) * sin)
     return q_embed, k_embed
 
 
@@ -661,7 +680,8 @@ class MoEGate(PretrainedMoEGate):
             hidden_states (_type_): [batch_size * seq_len, hidden_size]
         """
         _, h_dim = hidden_states.shape
-
+        print('scoring_func:', self.scoring_func)
+        print('topk_methord:', self.topk_method)
         # compute gating score
         logits = F.linear(hidden_states, self.weight, None)
 
@@ -1055,6 +1075,7 @@ class DeepseekV2DecoderLayer(nn.Layer):
             warnings.warn(
                 "Passing `padding_mask` is deprecated and will be removed in v4.37. Please make sure use `attention_mask` instead.`"
             )
+        print("start attn")
         residual = hidden_states
 
         hidden_states = self.input_layernorm(hidden_states)
@@ -1090,8 +1111,8 @@ class DeepseekV2DecoderLayer(nn.Layer):
                 **kwargs,
             )
         hidden_states = residual + hidden_states
-
         # Fully Connected
+        print("start moe")
         residual = hidden_states
         hidden_states = self.post_attention_layernorm(hidden_states)
         hidden_states = self.mlp(hidden_states)
@@ -1108,6 +1129,7 @@ class DeepseekV2DecoderLayer(nn.Layer):
         if type(outputs) is tuple and len(outputs) == 1:
             outputs = outputs[0]
 
+        print("finish moe")
         return outputs
 
 

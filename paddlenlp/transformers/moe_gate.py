@@ -136,7 +136,7 @@ class MoEGateMixin:
         Returns:
             paddle.Tensor: The z loss value.
         """
-        l_zloss = logits.exp().sum(1).log().square().mean()
+        l_zloss = paddle.logsumexp(logits, axis=1).square().mean()
         return l_zloss
 
     def _cal_orthogonal_loss(self) -> paddle.Tensor:
@@ -276,13 +276,13 @@ class PretrainedMoEGate(nn.Layer, MoEGateMixin):
         assert n_experts % n_group == 0, "n_experts must be divisible by n_groups"
 
         group_scores = scores.reshape([0, n_group, -1]).max(axis=-1)  # [n, n_group]
-        group_idx = paddle.topk(group_scores, k=topk_group, axis=-1, sorted=False)[1]  # [n, top_k_group]
+        group_idx = paddle.topk(group_scores, k=topk_group, axis=-1)[1]  # [n, top_k_group]
         group_mask = paddle.zeros_like(group_scores).put_along_axis(group_idx, paddle.to_tensor(1.0), axis=-1)  # fmt:skip
         score_mask = (
             group_mask.unsqueeze(-1).expand([bsz_seq_len, n_group, n_experts // n_group]).reshape([bsz_seq_len, -1])
         )  # [n, e]
         tmp_scores = scores * score_mask  # [n, e]
-        topk_weight, topk_idx = paddle.topk(tmp_scores, k=k, axis=-1, sorted=False)
+        topk_weight, topk_idx = paddle.topk(tmp_scores, k=k, axis=-1)
 
         return topk_weight, topk_idx
 
@@ -310,13 +310,13 @@ class PretrainedMoEGate(nn.Layer, MoEGateMixin):
         assert self.e_score_correction_bias is not None, "e_score_correction_bias is None"
         scores = scores.reshape([bsz_seq_len, -1]) + self.e_score_correction_bias.unsqueeze(0)
         group_scores = scores.reshape([bsz_seq_len, self.n_group, -1]).topk(2, axis=-1)[0].sum(axis=-1)  # [n, n_group]
-        group_idx = paddle.topk(group_scores, k=topk_group, axis=-1, sorted=False)[1]  # [n, top_k_group]
+        group_idx = paddle.topk(group_scores, k=topk_group, axis=-1)[1]  # [n, top_k_group]
         group_mask = paddle.zeros_like(group_scores).put_along_axis(group_idx, paddle.to_tensor(1.0), axis=-1)  # fmt:skip
         score_mask = (
             group_mask.unsqueeze(-1).expand([bsz_seq_len, n_group, n_experts // n_group]).reshape([bsz_seq_len, -1])
         )  # [n, e]
         tmp_scores = scores * score_mask  # [n, e]
-        topk_weight, topk_idx = paddle.topk(tmp_scores, k=k, axis=-1, sorted=False)
+        topk_weight, topk_idx = paddle.topk(tmp_scores, k=k, axis=-1)
         topk_weight = scores.gather(topk_idx, axis=1) if not self.training else topk_weight
 
         return topk_weight, topk_idx
@@ -513,7 +513,7 @@ class PretrainedMoEGate(nn.Layer, MoEGateMixin):
             # update mask and locations by capacity
             if self.drop_policy == "probs":
                 topk_masked_gates = paddle.zeros_like(gates).put_along_axis(top_idx, top_gate, axis=1)
-                capacity_probs, capacity_indices = paddle.topk(topk_masked_gates, k=capacity, axis=0, sorted=False)
+                capacity_probs, capacity_indices = paddle.topk(topk_masked_gates, k=capacity, axis=0)
                 token_priority = self._priority(capacity_indices, capacity)
 
             elif self.drop_policy == "position":

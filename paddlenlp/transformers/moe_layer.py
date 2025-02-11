@@ -248,7 +248,8 @@ class MoELayer(nn.Layer):
         # dispatch_mask    : sec
         # self.exp_counts  :
         dispatched_input = paddle.einsum("sec,sm->ecm", paddle.cast(dispatch_mask, hidden_state.dtype), reshaped_input)
-
+        if dispatched_input.dtype in [paddle.float32]:
+            dispatched_input = paddle.cast(dispatched_input, paddle.bfloat16)
         if self.expert_parallel_degree > 1:
             dispatched_input = _AllToAll.apply(dispatched_input, self.moe_group)
 
